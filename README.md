@@ -73,7 +73,7 @@ yes | "$SDK/cmdline-tools/latest/bin/sdkmanager.bat" --sdk_root="$SDK" --license
 Di Git Bash:
 
 ```bash
-cd /d && git clone https://github.com/pututjr/mibox-glass-tv.git && cd mibox-glass-tv
+cd /d && git clone https://github.com/pututjr/Mibox-Glass-TV.git mibox-glass-tv && cd mibox-glass-tv
 git clone -c core.longpaths=true https://github.com/cocombee/glass-tv.git
 cd glass-tv && git checkout -q ce164b6 && git apply ../glass-tv-mibox.patch && echo "patch OK"
 ```
