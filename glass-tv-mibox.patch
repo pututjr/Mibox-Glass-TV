@@ -1,0 +1,438 @@
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Backdrop.java b/launcher/app/src/main/java/com/gathin/tvhome/Backdrop.java
+index 31d8dbc..de51b68 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Backdrop.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Backdrop.java
+@@ -32,7 +32,8 @@ final class Backdrop {
+      * The blurred copy is this many times smaller than the screen in each direction. Shrinking is
+      * itself a blur, so this sets a floor on the softness: an eighth was too soft to tune down.
+      */
+-    static final int SCALE = 2;
++    // Mi Box 3 (Amlogic S905X, Mali-450): a third instead of a half, about 2.25x less blur work and memory.
++    static final int SCALE = 3;
+     /** Box radius and passes at the small size: about 4px of softening on screen. */
+     private static final int RADIUS = 2;
+     private static final int PASSES = 2;
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+index 9f8ded9..7e07924 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/ClockDream.java
+@@ -33,10 +33,13 @@ public class ClockDream extends DreamService {
+     private final Random random = new Random();
+     private View content;
+     private ClockFace face;
++    private TextView prayer;
++    private Config prayerCfg;
+ 
+     private final Runnable tick = new Runnable() {
+         @Override
+         public void run() {
++            updatePrayer();
+             moveClock();
+             handler.postDelayed(this, MOVE_MS);
+         }
+@@ -59,6 +62,13 @@ public class ClockDream extends DreamService {
+         String pattern = DateFormat.getBestDateTimePattern(Locale.getDefault(), "MMMdyyyy");
+         date.setFormat12Hour(pattern);
+         date.setFormat24Hour(pattern);
++        prayer = findViewById(R.id.dreamPrayer);
++        Config cfg = Config.load(this);
++        if (cfg.prayerTimes) {
++            prayerCfg = cfg;
++            prayer.setVisibility(View.VISIBLE);
++            updatePrayer();
++        }
+         View screen = (View) content.getParent();
+         screen.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+             if (b - t != ob - ot) size(b - t);
+@@ -79,6 +89,8 @@ public class ClockDream extends DreamService {
+         time.setTextSize(TypedValue.COMPLEX_UNIT_PX, 44f * u);
+         amPm.setTextSize(TypedValue.COMPLEX_UNIT_PX, 14f * u);
+         date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f);
++        prayer.setTextSize(TypedValue.COMPLEX_UNIT_PX, 10f * u);
++        ((LinearLayout.LayoutParams) prayer.getLayoutParams()).topMargin = Math.round(18f * u);
+ 
+         // The tops of the digits sit 34 units under the rim, below the room the dial keeps for its shadow.
+         LinearLayout.LayoutParams row = (LinearLayout.LayoutParams) findViewById(R.id.dreamTimeRow).getLayoutParams();
+@@ -93,6 +105,29 @@ public class ClockDream extends DreamService {
+         content.requestLayout();
+     }
+ 
++    /** Lima waktu sholat hari ini, waktu berikutnya berwarna emas, lalu kota dan hitung mundurnya. */
++    private void updatePrayer() {
++        if (prayerCfg == null) return;
++        java.util.Calendar now = java.util.Calendar.getInstance();
++        int[] t = PrayerTimes.forDay(now, prayerCfg.prayerLat, prayerCfg.prayerLng, prayerCfg.prayerIhtiyat);
++        int cur = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE);
++        int next = PrayerTimes.nextIndex(t, cur);
++        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
++        for (int i = 0; i < 5; i++) {
++            if (i > 0) sb.append("     ");
++            int start = sb.length();
++            sb.append(PrayerTimes.NAMES[i]).append("  ").append(PrayerTimes.hhmm(t[i]));
++            int color = i == next || (next < 0 && i == 0) ? 0xFFF2CD7A : 0xFFB5B6B8;
++            sb.setSpan(new android.text.style.ForegroundColorSpan(color), start, sb.length(), 0);
++        }
++        sb.append(System.lineSeparator());
++        String where = prayerCfg.prayerCity.isEmpty() ? "" : prayerCfg.prayerCity + "  ·  ";
++        int start = sb.length();
++        sb.append(where).append(PrayerTimes.nextLine(now, prayerCfg.prayerLat, prayerCfg.prayerLng, prayerCfg.prayerIhtiyat));
++        sb.setSpan(new android.text.style.RelativeSizeSpan(0.85f), start, sb.length(), 0);
++        prayer.setText(sb);
++    }
++
+     /** How far below the top of {@code view} the tops of {@code letters} are drawn. */
+     static float capInset(TextView view, String letters) {
+         Paint paint = view.getPaint();
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/Config.java b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+index c6e55a9..e21b455 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/Config.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/Config.java
+@@ -66,6 +66,12 @@ final class Config {
+     final int cacheCleanDays;
+     /** Whether the overlay file was present and parsed. */
+     final boolean overlayApplied;
++    /** Jadwal sholat di bar atas dan screensaver (prayer_times), lokasi kota, dan ihtiyat dalam menit. */
++    boolean prayerTimes;
++    String prayerCity;
++    double prayerLat;
++    double prayerLng;
++    int prayerIhtiyat;
+ 
+     private Config(List<String> dockApps, List<String> hiddenApps, String liveTvPackage, String liveTvAction,
+                    String sourcePanelService, String sourcePanelAction, String inputAction,
+@@ -171,10 +177,38 @@ final class Config {
+         int cacheCleanDays = json != null ? integer(json, "cache_clean_days", CacheCleaner.DEFAULT_DAYS, 0, 90)
+                 : CacheCleaner.DEFAULT_DAYS;
+ 
+-        return new Config(dock, hidden, liveTv, liveTvAction, panelService, panelAction, inputAction,
++        Config c = new Config(dock, hidden, liveTv, liveTvAction, panelService, panelAction, inputAction,
+                 Math.max(1, columns), Math.max(0, rowsBelow), shamsi, moduleCards, reducedMotion,
+                 vpn, homeSettings, networkPill, liveTvRow, background, wallpaper, wallpapers, wallpaperIntervalMs,
+                 places, cacheCleanDays, applied);
++        c.prayerTimes = res.getBoolean(R.bool.prayer_times);
++        c.prayerCity = res.getString(R.string.prayer_city).trim();
++        c.prayerLat = parseDouble(res.getString(R.string.prayer_lat), -7.9666);
++        c.prayerLng = parseDouble(res.getString(R.string.prayer_lng), 112.6326);
++        c.prayerIhtiyat = res.getInteger(R.integer.prayer_ihtiyat_minutes);
++        if (json != null) {
++            c.prayerTimes = bool(json, "prayer_times", c.prayerTimes);
++            c.prayerCity = string(json, "prayer_city", c.prayerCity);
++            c.prayerLat = decimal(json, "prayer_lat", c.prayerLat, -66, 66);
++            c.prayerLng = decimal(json, "prayer_lng", c.prayerLng, -180, 180);
++            c.prayerIhtiyat = integer(json, "prayer_ihtiyat_minutes", c.prayerIhtiyat, 0, 10);
++        }
++        return c;
++    }
++
++    private static double parseDouble(String s, double fallback) {
++        try {
++            return Double.parseDouble(s.trim());
++        } catch (NumberFormatException e) {
++            return fallback;
++        }
++    }
++
++    private static double decimal(JSONObject o, String key, double fallback, double min, double max) {
++        Object v = o.opt(key);
++        if (!(v instanceof Number)) return fallback;
++        double d = ((Number) v).doubleValue();
++        return d < min || d > max ? fallback : d;
+     }
+ 
+     /** Reads and parses the overlay; any problem means "no overlay", never a crash on the home screen. */
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+index 3cd391e..f185f6b 100644
+--- a/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
++++ b/launcher/app/src/main/java/com/gathin/tvhome/MainActivity.java
+@@ -128,6 +128,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+     private View btnInputs;
+     private TextView btnWifi;
+     private TextView shamsiDate;
++    private TextView prayerLine;
++    private Config prayerCfg;
+     private boolean shamsi;
+     private String vpnApp;
+     private SpringAnimation springX, springY;
+@@ -233,7 +235,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+             updateShamsiDate();
+             updateWifiLabel();
+             refreshPlacesIfDue();
+-            handler.postDelayed(this, MINUTE_MS);
++            handler.postDelayed(this, untilNextMinute());
+         }
+     };
+ 
+@@ -293,6 +295,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         if (!cfg.showNetworkPill) btnWifi.setVisibility(View.GONE);
+         shamsiDate = findViewById(R.id.shamsiDate);
+         shamsi = cfg.shamsiDate;
++        prayerLine = findViewById(R.id.prayerLine);
++        if (cfg.prayerTimes) {
++            prayerCfg = cfg;
++            prayerLine.setVisibility(View.VISIBLE);
++        }
+         if (shamsi) {
+             shamsiDate.setVisibility(View.VISIBLE);
+             TextView date = findViewById(R.id.date);
+@@ -672,7 +679,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+         updateWifiLabel();
+         updateInputsButton();
+         startWallpaperRotation();
+-        handler.postDelayed(minuteTick, MINUTE_MS);
++        handler.postDelayed(minuteTick, untilNextMinute());
+         handler.removeCallbacks(cacheClean);
+         handler.postDelayed(cacheClean, CacheCleaner.IDLE_MS);
+         hiddenSinceResume = false;
+@@ -1458,8 +1465,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
+ 
+     // ---- top bar ---------------------------------------------------------------------------------
+ 
++    /** Sampai pergantian menit berikutnya (+0,5 dtk), agar hitung mundur sholat pas dengan jam. */
++    private static long untilNextMinute() {
++        return MINUTE_MS - System.currentTimeMillis() % MINUTE_MS + 500;
++    }
++
+     private void updateShamsiDate() {
+         if (shamsi) shamsiDate.setText(Shamsi.today());
++        if (prayerCfg != null) {
++            prayerLine.setText(PrayerTimes.nextLine(java.util.Calendar.getInstance(),
++                    prayerCfg.prayerLat, prayerCfg.prayerLng, prayerCfg.prayerIhtiyat));
++        }
+     }
+ 
+     /** Shows the Wi-Fi network name on the button when we can read it, otherwise the connection type. */
+diff --git a/launcher/app/src/main/java/com/gathin/tvhome/PrayerTimes.java b/launcher/app/src/main/java/com/gathin/tvhome/PrayerTimes.java
+new file mode 100644
+index 0000000..7c55737
+--- /dev/null
++++ b/launcher/app/src/main/java/com/gathin/tvhome/PrayerTimes.java
+@@ -0,0 +1,142 @@
++package com.gathin.tvhome;
++
++import java.util.Calendar;
++import java.util.TimeZone;
++
++/**
++ * Jadwal sholat dihitung di TV, tanpa internet, dengan kriteria Kemenag RI:
++ * Subuh 20°, Isya 18°, Ashar Syafi'i (bayangan 1×), Maghrib saat matahari terbenam,
++ * lalu ihtiyat (pengaman) beberapa menit, dibulatkan ke atas ke menit penuh.
++ * Rumus astronomi mengikuti PrayTimes.org (Hamid Zarrabi-Zadeh, LGPL/MIT-style).
++ */
++final class PrayerTimes {
++
++    static final String[] NAMES = {"Subuh", "Dzuhur", "Ashar", "Maghrib", "Isya"};
++    /** Lama "sekarang waktu X" tetap ditampilkan setelah waktunya masuk. */
++    static final int NOW_WINDOW_MIN = 15;
++
++    private PrayerTimes() {
++    }
++
++    /** Menit sejak tengah malam (waktu lokal) untuk lima waktu sholat pada tanggal {@code day}. */
++    static int[] forDay(Calendar day, double lat, double lng, int ihtiyatMin) {
++        TimeZone tz = day.getTimeZone();
++        Calendar noon = (Calendar) day.clone();
++        noon.set(Calendar.HOUR_OF_DAY, 12);
++        noon.set(Calendar.MINUTE, 0);
++        double tzHours = tz.getOffset(noon.getTimeInMillis()) / 3_600_000.0;
++        double jd = julian(day.get(Calendar.YEAR), day.get(Calendar.MONTH) + 1, day.get(Calendar.DAY_OF_MONTH))
++                - lng / (15.0 * 24.0);
++
++        // Dua putaran: putaran kedua memakai hasil pertama sebagai perkiraan, lebih tepat.
++        double[] t = {5, 12, 13, 18, 18};
++        for (int pass = 0; pass < 2; pass++) {
++            double[] p = new double[5];
++            for (int i = 0; i < 5; i++) p[i] = t[i] / 24.0;
++            t = new double[]{
++                    sunAngleTime(jd, 20.0, p[0], lat, true),
++                    midDay(jd, p[1]),
++                    asrTime(jd, 1, p[2], lat),
++                    sunAngleTime(jd, 0.833, p[3], lat, false),
++                    sunAngleTime(jd, 18.0, p[4], lat, false)};
++        }
++        int[] out = new int[5];
++        for (int i = 0; i < 5; i++) {
++            double h = t[i] + tzHours - lng / 15.0;
++            out[i] = (int) Math.ceil(h * 60.0 - 1e-6) + ihtiyatMin;
++        }
++        return out;
++    }
++
++    /** "04:12" */
++    static String hhmm(int minutes) {
++        minutes = ((minutes % 1440) + 1440) % 1440;
++        return String.format(java.util.Locale.ROOT, "%02d:%02d", minutes / 60, minutes % 60);
++    }
++
++    /**
++     * Baris untuk bar atas: "Ashar 15:02 · 1 j 12 m lagi", atau "Waktu Ashar · 15:02" selama
++     * {@link #NOW_WINDOW_MIN} menit setelah waktunya masuk.
++     */
++    static String nextLine(Calendar now, double lat, double lng, int ihtiyatMin) {
++        int[] today = forDay(now, lat, lng, ihtiyatMin);
++        int cur = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
++        for (int i = 0; i < 5; i++) {
++            if (cur >= today[i] && cur < today[i] + NOW_WINDOW_MIN) {
++                return "Waktu " + NAMES[i] + " · " + hhmm(today[i]);
++            }
++        }
++        for (int i = 0; i < 5; i++) {
++            if (today[i] > cur) return NAMES[i] + " " + hhmm(today[i]) + " · " + until(today[i] - cur);
++        }
++        Calendar tomorrow = (Calendar) now.clone();
++        tomorrow.add(Calendar.DAY_OF_MONTH, 1);
++        int subuh = forDay(tomorrow, lat, lng, ihtiyatMin)[0];
++        return NAMES[0] + " " + hhmm(subuh) + " · " + until(subuh + 1440 - cur);
++    }
++
++    /** Indeks waktu sholat berikutnya hari ini, atau -1 bila semua sudah lewat. */
++    static int nextIndex(int[] today, int curMin) {
++        for (int i = 0; i < 5; i++) if (today[i] > curMin) return i;
++        return -1;
++    }
++
++    private static String until(int minutes) {
++        int h = minutes / 60, m = minutes % 60;
++        if (h == 0) return m + " menit lagi";
++        return m == 0 ? h + " jam lagi" : h + " j " + m + " m lagi";
++    }
++
++    // --- astronomi -------------------------------------------------------------------------
++
++    private static double julian(int y, int m, int d) {
++        if (m <= 2) {
++            y -= 1;
++            m += 12;
++        }
++        double a = Math.floor(y / 100.0);
++        double b = 2 - a + Math.floor(a / 4.0);
++        return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + b - 1524.5;
++    }
++
++    /** {declination in degrees, equation of time in hours} */
++    private static double[] sunPosition(double jd) {
++        double d = jd - 2451545.0;
++        double g = fixAngle(357.529 + 0.98560028 * d);
++        double q = fixAngle(280.459 + 0.98564736 * d);
++        double l = fixAngle(q + 1.915 * dsin(g) + 0.020 * dsin(2 * g));
++        double e = 23.439 - 0.00000036 * d;
++        double ra = darctan2(dcos(e) * dsin(l), dcos(l)) / 15.0;
++        double eqt = q / 15.0 - fixHour(ra);
++        double decl = darcsin(dsin(e) * dsin(l));
++        return new double[]{decl, eqt};
++    }
++
++    private static double midDay(double jd, double t) {
++        double eqt = sunPosition(jd + t)[1];
++        return fixHour(12 - eqt);
++    }
++
++    private static double sunAngleTime(double jd, double angle, double t, double lat, boolean beforeNoon) {
++        double decl = sunPosition(jd + t)[0];
++        double noon = midDay(jd, t);
++        double x = (-dsin(angle) - dsin(decl) * dsin(lat)) / (dcos(decl) * dcos(lat));
++        x = Math.max(-1, Math.min(1, x));
++        double span = darccos(x) / 15.0;
++        return noon + (beforeNoon ? -span : span);
++    }
++
++    private static double asrTime(double jd, int factor, double t, double lat) {
++        double decl = sunPosition(jd + t)[0];
++        double angle = -Math.toDegrees(Math.atan(1.0 / (factor + Math.tan(Math.toRadians(Math.abs(lat - decl))))));
++        return sunAngleTime(jd, angle, t, lat, false);
++    }
++
++    private static double dsin(double d) { return Math.sin(Math.toRadians(d)); }
++    private static double dcos(double d) { return Math.cos(Math.toRadians(d)); }
++    private static double darcsin(double x) { return Math.toDegrees(Math.asin(x)); }
++    private static double darccos(double x) { return Math.toDegrees(Math.acos(x)); }
++    private static double darctan2(double y, double x) { return Math.toDegrees(Math.atan2(y, x)); }
++    private static double fixAngle(double a) { a = a - 360.0 * Math.floor(a / 360.0); return a < 0 ? a + 360 : a; }
++    private static double fixHour(double h) { h = h - 24.0 * Math.floor(h / 24.0); return h < 0 ? h + 24 : h; }
++}
+diff --git a/launcher/app/src/main/res/layout/activity_main.xml b/launcher/app/src/main/res/layout/activity_main.xml
+index 75d357d..88eaac1 100644
+--- a/launcher/app/src/main/res/layout/activity_main.xml
++++ b/launcher/app/src/main/res/layout/activity_main.xml
+@@ -182,6 +182,24 @@
+                 </LinearLayout>
+             </LinearLayout>
+ 
++            <!-- Waktu sholat berikutnya ("Ashar 15:02 · 1 j 12 m lagi"), di bawah jam, bila prayer_times aktif. -->
++            <TextView
++                android:id="@+id/prayerLine"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:layout_below="@id/leftBlock"
++                android:layout_alignParentStart="true"
++                android:layout_marginTop="2dp"
++                android:gravity="left"
++                android:singleLine="true"
++                android:textColor="#FFF2CD7A"
++                android:textSize="17sp"
++                android:fontFamily="@font/outfit"
++                android:fontVariationSettings="'wght' 500"
++                android:letterSpacing="0.03"
++                android:includeFontPadding="false"
++                android:visibility="gone" />
++
+             <LinearLayout
+                 android:id="@+id/topButtons"
+                 android:layout_width="wrap_content"
+diff --git a/launcher/app/src/main/res/layout/dream_clock.xml b/launcher/app/src/main/res/layout/dream_clock.xml
+index 3c8cf06..5795bf6 100644
+--- a/launcher/app/src/main/res/layout/dream_clock.xml
++++ b/launcher/app/src/main/res/layout/dream_clock.xml
+@@ -56,5 +56,19 @@
+             android:letterSpacing="0.14"
+             android:textAllCaps="true"
+             android:includeFontPadding="false" />
++
++        <!-- Jadwal sholat hari ini (ClockDream mengisi dan menyorot waktu berikutnya). -->
++        <TextView
++            android:id="@+id/dreamPrayer"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:gravity="center_horizontal"
++            android:lineSpacingMultiplier="1.5"
++            android:textColor="#FF8B8C90"
++            android:fontFamily="@font/outfit"
++            android:fontVariationSettings="'wght' 400"
++            android:letterSpacing="0.04"
++            android:includeFontPadding="false"
++            android:visibility="gone" />
+     </LinearLayout>
+ </FrameLayout>
+diff --git a/launcher/app/src/main/res/values/config.xml b/launcher/app/src/main/res/values/config.xml
+index 60f29ef..837efd1 100644
+--- a/launcher/app/src/main/res/values/config.xml
++++ b/launcher/app/src/main/res/values/config.xml
+@@ -11,10 +11,18 @@
+          (no leanback entry) shows only when it is listed here. -->
+     <string-array name="dock_apps">
+         <item>com.google.android.youtube.tv</item>
+-        <item>in.startv.hotstar.dplus.tv</item>
+-        <item>com.crunchyroll.crunchyroid</item>
+-        <item>com.apple.atve.androidtv.appletv</item>
++        <item>com.netflix.ninja</item>
++        <item>com.amazon.amazonvideo.livingroom</item>
++        <item>com.mxtech.videoplayer.ad</item>
+     </string-array>
++    <!-- Jadwal sholat (kriteria Kemenag, dihitung di TV tanpa internet): baris waktu sholat berikutnya
++         di bawah jam, dan lima waktu di screensaver. Lokasi bisa diganti lewat config.json:
++         "prayer_city", "prayer_lat", "prayer_lng", "prayer_ihtiyat_minutes", atau "prayer_times": false. -->
++    <bool name="prayer_times">true</bool>
++    <string name="prayer_city" translatable="false">Malang</string>
++    <string name="prayer_lat" translatable="false">-7.9666</string>
++    <string name="prayer_lng" translatable="false">112.6326</string>
++    <integer name="prayer_ihtiyat_minutes">2</integer>
+ 
+     <!-- Apps never shown as tiles (e.g. the Live TV app, which the Inputs menu already covers). -->
+     <string-array name="hidden_apps">
+@@ -78,5 +86,6 @@
+          true keeps the GPU drawing path but calms the movement: a stiff highlight spring with no bounce,
+          tiles that zoom without overshoot, shorter fades and no tile entrance when Home comes back. Set it
+          here or with "reduced_motion": true in a theme's config.json; false keeps the normal motion. -->
+-    <bool name="reduced_motion">false</bool>
++    <!-- Mi Box 3 (Mali-450, RAM 2 GB): gerakan lebih tenang secara default. -->
++    <bool name="reduced_motion">true</bool>
+ </resources>
