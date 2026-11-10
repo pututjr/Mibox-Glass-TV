@@ -1,6 +1,6 @@
-# Cadangkan kondisi Mi Box / Android TV sebelum mengganti launcher. Hanya MEMBACA, tidak mengubah apa pun di TV.
+# Cadangkan kondisi Mi Box 3 / Android TV sebelum mengganti launcher. Hanya MEMBACA, tidak mengubah apa pun di TV.
 # Hasil: folder backup-mibox-<tanggal> berisi daftar aplikasi, pengaturan, info perangkat, launcher aktif,
-# salinan APK launcher bawaan, dan skrip restore-mibox.ps1 (bila file itu ada di sebelah skrip ini).
+# salinan APK launcher bawaan, dan skrip restore-mibox.ps1.
 # Pakai:  powershell -ExecutionPolicy Bypass -File backup-mibox.ps1 -TvHost 192.168.1.5
 param([string]$TvHost = '192.168.1.5', [string]$OutDir = '')
 $ErrorActionPreference = 'Stop'
@@ -12,7 +12,7 @@ function Tv([string]$cmd) { & $adb -s $dev shell $cmd }
 & $adb connect $dev | Out-Null
 $state = & $adb -s $dev get-state 2>$null
 if ($state -ne 'device') {
-    throw "Mi Box belum terhubung (status: '$state'). Kalau di TV muncul 'Allow USB debugging?', centang 'Always allow' lalu OK, kemudian jalankan skrip ini lagi."
+    throw "TV belum terhubung (status: '$state'). Kalau di TV muncul 'Allow USB debugging?', centang 'Always allow' lalu OK, kemudian jalankan skrip ini lagi."
 }
 
 if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot ("backup-mibox-" + (Get-Date -Format 'yyyyMMdd-HHmm')) }
@@ -27,6 +27,9 @@ foreach ($ns in 'system', 'secure', 'global') { Save "settings-$ns.txt" "setting
 Save 'home-launcher.txt' 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME'
 Save 'home-candidates.txt' 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME'
 Save 'meminfo.txt' 'head -3 /proc/meminfo'
+# Nilai yang diubah pasang-mibox.ps1, disimpan terpisah agar restore-mibox.ps1 bisa mengembalikannya.
+Save 'screen_off_timeout.txt' 'settings get system screen_off_timeout'
+Save 'screensaver_components.txt' 'settings get secure screensaver_components'
 
 $homeAct = "$(Get-Content "$OutDir\home-launcher.txt" | Select-Object -Last 1)".Trim()
 $stockPkg = $homeAct.Split('/')[0]

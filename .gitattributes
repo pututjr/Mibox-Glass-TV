@@ -1,2 +1,5 @@
 *.patch -text
 *.png binary
+*.apk binary
+*.mp3 binary
+*.ogg binary
